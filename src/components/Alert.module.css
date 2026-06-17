@@ -1,0 +1,27 @@
+.alert {
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-size: 13px;
+  margin-bottom: 1.25rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  display: flex;
+}
+
+.icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+}
+
+.info    { background: var(--accent-light); color: var(--navy-mid);  border: 1px solid #b8d4f0; }
+.success { background: var(--success-bg);   color: var(--success);   border: 1px solid #a3dbc9; }
+.error   { background: var(--error-bg);     color: var(--error);     border: 1px solid #f0c0ba; }
+.warning { background: var(--warning-bg);   color: var(--warning);   border: 1px solid #f0d98a; }

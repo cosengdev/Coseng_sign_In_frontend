@@ -1,0 +1,26 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 520px;
+}
+.greeting { text-align: center; margin-bottom: 2rem; }
+.greeting h1 { font-family: 'DM Serif Display', serif; font-size: 28px; font-weight: 400; color: var(--navy); margin-bottom: 6px; }
+.greeting p { color: var(--text-secondary); font-size: 14px; }
+.dateBar { background: var(--white); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; text-align: center; margin-bottom: 2rem; font-size: 13px; color: var(--text-secondary); width: 100%; }
+.dateBar strong { color: var(--navy); font-weight: 600; }
+.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: 100%; }
+.card { background: var(--white); border: 1.5px solid var(--border); border-radius: 16px; padding: 2rem 1.25rem; text-align: center; cursor: pointer; transition: all 0.2s; position: relative; overflow: hidden; }
+.staffCard:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(10,37,64,0.1); }
+.staffCard:hover .iconWrap { background: var(--accent); }
+.staffCard:hover .iconWrap svg { stroke: white; }
+.visitorCard:hover { border-color: var(--gold); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(10,37,64,0.1); }
+.visitorCard:hover .iconVisitor { background: var(--gold); }
+.visitorCard:hover .iconVisitor svg { stroke: white; }
+.iconWrap { width: 56px; height: 56px; border-radius: 14px; background: var(--accent-light); display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem; transition: all 0.2s; }
+.iconWrap svg { width: 28px; height: 28px; stroke: var(--accent); transition: all 0.2s; }
+.iconVisitor { background: #fef9ec; }
+.iconVisitor svg { stroke: var(--gold); }
+.card h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; color: var(--navy); }
+.card p { font-size: 12px; color: var(--text-muted); }

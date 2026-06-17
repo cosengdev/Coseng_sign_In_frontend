@@ -1,0 +1,21 @@
+.verified {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--success);
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.verified svg {
+  width: 14px;
+  height: 14px;
+  stroke: var(--success);
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 1.5rem 0;
+}
