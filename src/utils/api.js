@@ -1,3 +1,4 @@
+
 import axios from 'axios'
 
 // ─────────────────────────────────────────────────────────
@@ -5,12 +6,10 @@ import axios from 'axios'
 // ─────────────────────────────────────────────────────────
 const MOCK_MODE = true
 
-// Safety check — warn in console if accidentally left on in production
 if (!MOCK_MODE && import.meta.env.DEV) {
   console.warn('⚠️ MOCK_MODE is off — connecting to real backend')
 }
 
-// ── In-memory store ───────────────────────────────────────
 const mockDB = {
   staff: {
     'EMP-001': { badgeNumber: 'EMP-001', firstName: 'Amina', lastName: 'Yusuf', role: 'Data and Research Analysts', phone: '08012345678' },
@@ -23,6 +22,7 @@ const mockDB = {
     { id: 2, badgeNumber: 'EMP-001', name: 'Amina Yusuf', role: 'Data and Research Analysts', signIn: new Date(Date.now() - 172800000).toISOString(), signOut: new Date(Date.now() - 169200000).toISOString() },
   ],
   visitorLogs: [],
+  adminLogs: [],
 }
 
 function mockDelay(ms = 300) { return new Promise(r => setTimeout(r, ms)) }
@@ -41,7 +41,6 @@ function getOpenVisitorEntry(name, phone) {
   ) || null
 }
 
-// Track recent submissions to prevent double-clicks (mock)
 const recentSubmissions = new Set()
 function isDuplicate(key) {
   if (recentSubmissions.has(key)) return true
@@ -84,8 +83,15 @@ const mock = {
     await mockDelay()
     const admin = mockDB.admins[badgeNumber]
     if (!admin || admin.pin !== pin) return mockError(401, 'Invalid badge number or PIN')
-    // Return a fake token so the frontend flow works identically
-    return mockResponse({ token: 'mock-token-' + Date.now(), badgeNumber, name: admin.name, role: 'Administrator' })
+    const logId = `mock-log-${Date.now()}`
+    mockDB.adminLogs.push({ id: logId, badgeNumber, name: admin.name, role: 'Administrator', loginTime: new Date().toISOString(), logoutTime: null })
+    return mockResponse({ token: 'mock-token-' + Date.now(), badgeNumber, name: admin.name, role: 'Administrator', logId })
+  },
+  adminLogout: async (logId) => {
+    await mockDelay()
+    const log = mockDB.adminLogs.find(l => l.id === logId)
+    if (log) log.logoutTime = new Date().toISOString()
+    return mockResponse({ success: true })
   },
   visitorSignIn: async (data) => {
     await mockDelay()
@@ -112,15 +118,17 @@ const mock = {
     await mockDelay(100)
     return mockResponse([...mockDB.visitorLogs].reverse())
   },
+  getAdminLogs: async () => {
+    await mockDelay(100)
+    return mockResponse([...mockDB.adminLogs].reverse())
+  },
 }
 
-// ── Real Axios instance ───────────────────────────────────
 const api = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Attach JWT token to every real request automatically
 api.interceptors.request.use(config => {
   const session = sessionStorage.getItem('adminSession')
   if (session) {
@@ -130,7 +138,6 @@ api.interceptors.request.use(config => {
   return config
 })
 
-// If token expires mid-session, redirect to login
 api.interceptors.response.use(
   res => res,
   err => {
@@ -142,16 +149,17 @@ api.interceptors.response.use(
   }
 )
 
-// ── Exports ───────────────────────────────────────────────
-export const lookupStaff    = (badge)        => MOCK_MODE ? mock.lookupStaff(badge)         : api.get(`/staff/${badge}`)
-export const registerStaff  = (data)         => MOCK_MODE ? mock.registerStaff(data)         : api.post('/staff', data)
-export const signIn         = (badge)        => MOCK_MODE ? mock.signIn(badge)               : api.post('/attendance/signin', { badgeNumber: badge })
-export const signOut        = (badge, phone) => MOCK_MODE ? mock.signOut(badge, phone)       : api.post('/attendance/signout', { badgeNumber: badge, phone })
-export const adminLogin     = (badge, pin)   => MOCK_MODE ? mock.adminLogin(badge, pin)      : api.post('/admin/login', { badgeNumber: badge, pin })
-export const visitorSignIn  = (data)         => MOCK_MODE ? mock.visitorSignIn(data)         : api.post('/visitor/signin', data)
-export const visitorSignOut = (name, phone)  => MOCK_MODE ? mock.visitorSignOut(name, phone) : api.post('/visitor/signout', { name, phone })
-export const lookupVisitor  = (name, phone)  => MOCK_MODE ? mock.lookupVisitor(name, phone)  : api.get(`/visitor/lookup?name=${encodeURIComponent(name)}&phone=${phone}`)
-export const getStaffLogs   = ()             => MOCK_MODE ? mock.getStaffLogs()              : api.get('/admin/logs/staff')
-export const getVisitorLogs = ()             => MOCK_MODE ? mock.getVisitorLogs()            : api.get('/admin/logs/visitors')
+export const lookupStaff    = (badge)        => MOCK_MODE ? mock.lookupStaff(badge)          : api.get(`/staff/${badge}`)
+export const registerStaff  = (data)         => MOCK_MODE ? mock.registerStaff(data)          : api.post('/staff', data)
+export const signIn         = (badge)        => MOCK_MODE ? mock.signIn(badge)                : api.post('/attendance/signin', { badgeNumber: badge })
+export const signOut        = (badge, phone) => MOCK_MODE ? mock.signOut(badge, phone)        : api.post('/attendance/signout', { badgeNumber: badge, phone })
+export const adminLogin     = (badge, pin)   => MOCK_MODE ? mock.adminLogin(badge, pin)       : api.post('/admin/login', { badgeNumber: badge, pin })
+export const adminLogout    = (logId)        => MOCK_MODE ? mock.adminLogout(logId)           : api.post('/admin/logout', { logId })
+export const visitorSignIn  = (data)         => MOCK_MODE ? mock.visitorSignIn(data)          : api.post('/visitor/signin', data)
+export const visitorSignOut = (name, phone)  => MOCK_MODE ? mock.visitorSignOut(name, phone)  : api.post('/visitor/signout', { name, phone })
+export const lookupVisitor  = (name, phone)  => MOCK_MODE ? mock.lookupVisitor(name, phone)   : api.get(`/visitor/lookup?name=${encodeURIComponent(name)}&phone=${phone}`)
+export const getStaffLogs   = ()             => MOCK_MODE ? mock.getStaffLogs()               : api.get('/admin/logs/staff')
+export const getVisitorLogs = ()             => MOCK_MODE ? mock.getVisitorLogs()             : api.get('/admin/logs/visitors')
+export const getAdminLogs   = ()             => MOCK_MODE ? mock.getAdminLogs()               : api.get('/admin/logs/admin')
 
 export default api

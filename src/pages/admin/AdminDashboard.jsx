@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getStaffLogs, getVisitorLogs } from '../../utils/api'
+import { getStaffLogs, getVisitorLogs, getAdminLogs, adminLogout } from '../../utils/api'
 import { formatTime, formatShortDate } from '../../utils/time'
 import styles from './AdminDashboard.module.css'
 
-// ── Download helpers ──────────────────────────────────────
 function downloadCSV(data, filename) {
   if (!data.length) return
   const headers = Object.keys(data[0])
@@ -42,84 +41,121 @@ function downloadPDF(data, title) {
 }
 
 function formatLogsForExport(logs, type) {
-  return logs.map(l => {
-    if (type === 'staff') return {
-      'Badge':    l.badgeNumber || '',
-      'Name':     l.name || '',
-      'Role':     l.role || '',
-      'Sign In':  l.signIn  ? `${formatShortDate(l.signIn)}  ${formatTime(l.signIn)}`  : '—',
+  if (type === 'staff') {
+    return logs.map(l => ({
+      'Badge': l.badgeNumber || '',
+      'Name': l.name || '',
+      'Role': l.role || '',
+      'Sign In': l.signIn ? `${formatShortDate(l.signIn)} ${formatTime(l.signIn)}` : '—',
       'Sign Out': l.signOut ? `${formatShortDate(l.signOut)} ${formatTime(l.signOut)}` : '—',
-    }
-    return {
-      'Name':             l.name   || '',
-      'Phone':            l.phone  || '',
-      'Visiting':         l.host   || '',
+    }))
+  }
+  if (type === 'visitor') {
+    return logs.map(l => ({
+      'Name': l.name || '',
+      'Phone': l.phone || '',
+      'Visiting': l.host || '',
       'Reason for Visit': l.reason || '',
-      'Sign In':  l.signIn  ? `${formatShortDate(l.signIn)}  ${formatTime(l.signIn)}`  : '—',
+      'Sign In': l.signIn ? `${formatShortDate(l.signIn)} ${formatTime(l.signIn)}` : '—',
       'Sign Out': l.signOut ? `${formatShortDate(l.signOut)} ${formatTime(l.signOut)}` : '—',
-    }
-  })
+    }))
+  }
+  if (type === 'admin') {
+    return logs.map(l => ({
+      'Badge': l.badgeNumber || '',
+      'Name': l.name || '',
+      'Role': l.role || '',
+      'Login Time': l.loginTime ? `${formatShortDate(l.loginTime)} ${formatTime(l.loginTime)}` : '—',
+      'Logout Time': l.logoutTime ? `${formatShortDate(l.logoutTime)} ${formatTime(l.logoutTime)}` : '—',
+    }))
+  }
+  return []
 }
 
-// ── Search filter ─────────────────────────────────────────
 function filterLogs(logs, query, dateFilter, type) {
   const q = query.toLowerCase().trim()
   return logs.filter(l => {
-    // Text search — name, badge (staff), phone (visitor)
     const textMatch = !q || (
       l.name?.toLowerCase().includes(q) ||
-      (type === 'staff'   && l.badgeNumber?.toLowerCase().includes(q)) ||
+      (type === 'staff' && l.badgeNumber?.toLowerCase().includes(q)) ||
       (type === 'visitor' && l.phone?.includes(q)) ||
+      (type === 'admin' && l.badgeNumber?.toLowerCase().includes(q)) ||
       l.role?.toLowerCase().includes(q) ||
       l.host?.toLowerCase().includes(q)
     )
-    // Date filter
-    const dateMatch = !dateFilter || (
-      l.signIn && new Date(l.signIn).toISOString().slice(0, 10) === dateFilter
-    )
+    const dateField = type === 'admin' ? l.loginTime : l.signIn
+    const dateMatch = !dateFilter || (dateField && new Date(dateField).toISOString().slice(0, 10) === dateFilter)
     return textMatch && dateMatch
   })
 }
 
-// ── Stat cards (always based on today) ───────────────────
-function todayOnly(logs) {
+function todayOnly(logs, dateField = 'signIn') {
   const start = new Date(); start.setHours(0, 0, 0, 0)
-  return logs.filter(l => l.signIn && new Date(l.signIn) >= start)
+  return logs.filter(l => l[dateField] && new Date(l[dateField]) >= start)
 }
 
 export default function AdminDashboard() {
   const navigate = useNavigate()
-  const [tab, setTab]               = useState('staff')
-  const [staffLogs, setStaffLogs]   = useState([])
+  const [tab, setTab] = useState('staff')
+  const [staffLogs, setStaffLogs] = useState([])
   const [visitorLogs, setVisitorLogs] = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [search, setSearch]         = useState('')
+  const [adminLogs, setAdminLogs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
   const [dateFilter, setDateFilter] = useState('')
-
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const admin = JSON.parse(sessionStorage.getItem('adminSession') || 'null')
 
   useEffect(() => {
     if (!admin) { navigate('/admin/login'); return }
-    Promise.all([getStaffLogs(), getVisitorLogs()])
-      .then(([s, v]) => { setStaffLogs(s.data); setVisitorLogs(v.data) })
+    Promise.all([getStaffLogs(), getVisitorLogs(), getAdminLogs()])
+      .then(([s, v, a]) => {
+        setStaffLogs(s.data)
+        setVisitorLogs(v.data)
+        setAdminLogs(a.data)
+      })
       .finally(() => setLoading(false))
   }, [])
 
-  // Reset search when switching tabs
   function switchTab(t) { setTab(t); setSearch(''); setDateFilter('') }
 
-  function handleLogout() { sessionStorage.removeItem('adminSession'); navigate('/') }
+  async function handleLogout() {
+    setLoggingOut(true)
+    try {
+      await adminLogout(admin?.logId)
+    } catch { /* still log out even if recording fails */ }
+    finally {
+      sessionStorage.removeItem('adminSession')
+      navigate('/')
+    }
+  }
 
-  const rawLogs    = tab === 'staff' ? staffLogs : visitorLogs
-  const filtered   = useMemo(() => filterLogs(rawLogs, search, dateFilter, tab), [rawLogs, search, dateFilter, tab])
+  const rawLogs = tab === 'staff' ? staffLogs : tab === 'visitor' ? visitorLogs : adminLogs
+  const filtered = useMemo(() => filterLogs(rawLogs, search, dateFilter, tab), [rawLogs, search, dateFilter, tab])
   const exportData = formatLogsForExport(filtered, tab)
-  const exportTitle = tab === 'staff' ? 'Staff Attendance Log' : 'Visitor Log'
-
-  const todayStaff   = todayOnly(staffLogs)
+  const exportTitle = tab === 'staff' ? 'Staff Attendance Log' : tab === 'visitor' ? 'Visitor Log' : 'Admin Activity Log'
+  const todayStaff = todayOnly(staffLogs)
   const todayVisitor = todayOnly(visitorLogs)
 
   return (
     <div className={styles.wrapper}>
+
+      {/* ── Logout confirmation modal ── */}
+      {showConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: 'white', borderRadius: '12px', padding: '32px', maxWidth: '360px', width: '90%', textAlign: 'center', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
+            <div style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>Log out?</div>
+            <div style={{ fontSize: '14px', color: '#666', marginBottom: '24px' }}>Are you sure you want to end your admin session?</div>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button onClick={() => setShowConfirm(false)} disabled={loggingOut} style={{ padding: '10px 24px', borderRadius: '8px', border: '1px solid #ccc', background: 'white', cursor: 'pointer', fontWeight: 500 }}>Cancel</button>
+              <button onClick={handleLogout} disabled={loggingOut} style={{ padding: '10px 24px', borderRadius: '8px', border: 'none', background: '#0a2540', color: 'white', cursor: 'pointer', fontWeight: 500 }}>
+                {loggingOut ? 'Logging out...' : 'Yes, log out'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Top bar */}
       <div className={styles.topBar}>
@@ -127,7 +163,7 @@ export default function AdminDashboard() {
           <div className={styles.topTitle}>Admin Dashboard</div>
           <div className={styles.topSub}>Welcome, {admin?.name || 'Administrator'}</div>
         </div>
-        <button className={styles.logoutBtn} onClick={handleLogout}>
+        <button className={styles.logoutBtn} onClick={() => setShowConfirm(true)}>
           <svg fill="none" viewBox="0 0 24 24" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
           </svg>
@@ -135,7 +171,7 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {/* Stats — always today's numbers */}
+      {/* Stats */}
       <div className={styles.stats}>
         <div className={styles.statCard}>
           <div className={styles.statNum}>{todayStaff.filter(l => !l.signOut).length}</div>
@@ -157,59 +193,41 @@ export default function AdminDashboard() {
 
       {/* Table card */}
       <div className={styles.tableCard}>
-
-        {/* Toolbar row 1 — tabs + downloads */}
         <div className={styles.tableToolbar}>
           <div className={styles.tabs}>
-            <button className={`${styles.tab} ${tab === 'staff'   ? styles.tabActive : ''}`} onClick={() => switchTab('staff')}>Staff Activity</button>
+            <button className={`${styles.tab} ${tab === 'staff' ? styles.tabActive : ''}`} onClick={() => switchTab('staff')}>Staff Activity</button>
             <button className={`${styles.tab} ${tab === 'visitor' ? styles.tabActive : ''}`} onClick={() => switchTab('visitor')}>Visitor Activity</button>
+            <button className={`${styles.tab} ${tab === 'admin' ? styles.tabActive : ''}`} onClick={() => switchTab('admin')}>Admin Activity</button>
           </div>
           <div className={styles.downloadBtns}>
             <button className={styles.dlBtn} onClick={() => downloadCSV(exportData, `${exportTitle}.csv`)} disabled={!filtered.length}>
-              <svg fill="none" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
-              CSV
+              <svg fill="none" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>CSV
             </button>
             <button className={styles.dlBtn} onClick={() => downloadPDF(exportData, exportTitle)} disabled={!filtered.length}>
-              <svg fill="none" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
-              PDF
+              <svg fill="none" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>PDF
             </button>
           </div>
         </div>
 
-        {/* Toolbar row 2 — search + date filter */}
         <div className={styles.searchBar}>
           <div className={styles.searchWrap}>
             <svg className={styles.searchIcon} fill="none" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0015.803 15.803z"/>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0015.803 15.803z" />
             </svg>
-            <input
-              className={styles.searchInput}
-              type="text"
-              placeholder={tab === 'staff' ? 'Search by name, badge or role…' : 'Search by name, phone or host…'}
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-            {search && (
-              <button className={styles.clearBtn} onClick={() => setSearch('')}>✕</button>
-            )}
+            <input className={styles.searchInput} type="text"
+              placeholder={tab === 'staff' ? 'Search by name, badge or role…' : tab === 'visitor' ? 'Search by name, phone or host…' : 'Search by name or badge…'}
+              value={search} onChange={e => setSearch(e.target.value)} />
+            {search && <button className={styles.clearBtn} onClick={() => setSearch('')}>✕</button>}
           </div>
           <div className={styles.dateWrap}>
             <svg className={styles.calIcon} fill="none" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
             </svg>
-            <input
-              className={styles.dateInput}
-              type="date"
-              value={dateFilter}
-              onChange={e => setDateFilter(e.target.value)}
-            />
-            {dateFilter && (
-              <button className={styles.clearBtn} onClick={() => setDateFilter('')}>✕</button>
-            )}
+            <input className={styles.dateInput} type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} />
+            {dateFilter && <button className={styles.clearBtn} onClick={() => setDateFilter('')}>✕</button>}
           </div>
         </div>
 
-        {/* Results count */}
         {(search || dateFilter) && (
           <div className={styles.resultCount}>
             {filtered.length} result{filtered.length !== 1 ? 's' : ''} found
@@ -217,53 +235,59 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Table */}
         {loading ? (
           <div className={styles.empty}>Loading...</div>
         ) : filtered.length === 0 ? (
-          <div className={styles.empty}>
-            {search || dateFilter ? 'No records match your search.' : `No ${tab} activity recorded yet.`}
-          </div>
+          <div className={styles.empty}>{search || dateFilter ? 'No records match your search.' : `No ${tab} activity recorded yet.`}</div>
         ) : (
           <div className={styles.tableWrap}>
-            {tab === 'staff' ? (
+            {tab === 'staff' && (
               <table className={styles.table}>
-                <thead>
-                  <tr><th>Name</th><th>Badge</th><th>Role</th><th>Date</th><th>Sign In</th><th>Sign Out</th><th>Status</th></tr>
-                </thead>
-                <tbody>
-                  {filtered.map((l, i) => (
-                    <tr key={i}>
-                      <td className={styles.nameCell}>{l.name}</td>
-                      <td className={styles.mono}>{l.badgeNumber}</td>
-                      <td className={styles.muted}>{l.role}</td>
-                      <td className={styles.muted}>{l.signIn ? formatShortDate(l.signIn) : '—'}</td>
-                      <td className={styles.timeIn}>{l.signIn ? formatTime(l.signIn) : '—'}</td>
-                      <td className={l.signOut ? styles.timeOut : styles.timePending}>{l.signOut ? formatTime(l.signOut) : 'Active'}</td>
-                      <td><span className={`${styles.pill} ${l.signOut ? styles.pillOut : styles.pillIn}`}>{l.signOut ? 'Signed Out' : 'In Building'}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
+                <thead><tr><th>Name</th><th>Badge</th><th>Role</th><th>Date</th><th>Sign In</th><th>Sign Out</th><th>Status</th></tr></thead>
+                <tbody>{filtered.map((l, i) => (
+                  <tr key={i}>
+                    <td className={styles.nameCell}>{l.name}</td>
+                    <td className={styles.mono}>{l.badgeNumber}</td>
+                    <td className={styles.muted}>{l.role}</td>
+                    <td className={styles.muted}>{l.signIn ? formatShortDate(l.signIn) : '—'}</td>
+                    <td className={styles.timeIn}>{l.signIn ? formatTime(l.signIn) : '—'}</td>
+                    <td className={l.signOut ? styles.timeOut : styles.timePending}>{l.signOut ? formatTime(l.signOut) : 'Active'}</td>
+                    <td><span className={`${styles.pill} ${l.signOut ? styles.pillOut : styles.pillIn}`}>{l.signOut ? 'Signed Out' : 'In Building'}</span></td>
+                  </tr>
+                ))}</tbody>
               </table>
-            ) : (
+            )}
+            {tab === 'visitor' && (
               <table className={styles.table}>
-                <thead>
-                  <tr><th>Name</th><th>Phone</th><th>Visiting</th><th>Reason</th><th>Date</th><th>Sign In</th><th>Sign Out</th><th>Status</th></tr>
-                </thead>
-                <tbody>
-                  {filtered.map((l, i) => (
-                    <tr key={i}>
-                      <td className={styles.nameCell}>{l.name}</td>
-                      <td className={styles.muted}>{l.phone}</td>
-                      <td className={styles.muted}>{l.host}</td>
-                      <td className={styles.muted}>{l.reason}</td>
-                      <td className={styles.muted}>{l.signIn ? formatShortDate(l.signIn) : '—'}</td>
-                      <td className={styles.timeIn}>{l.signIn ? formatTime(l.signIn) : '—'}</td>
-                      <td className={l.signOut ? styles.timeOut : styles.timePending}>{l.signOut ? formatTime(l.signOut) : 'Active'}</td>
-                      <td><span className={`${styles.pill} ${l.signOut ? styles.pillOut : styles.pillIn}`}>{l.signOut ? 'Signed Out' : 'In Building'}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
+                <thead><tr><th>Name</th><th>Phone</th><th>Visiting</th><th>Reason</th><th>Date</th><th>Sign In</th><th>Sign Out</th><th>Status</th></tr></thead>
+                <tbody>{filtered.map((l, i) => (
+                  <tr key={i}>
+                    <td className={styles.nameCell}>{l.name}</td>
+                    <td className={styles.muted}>{l.phone}</td>
+                    <td className={styles.muted}>{l.host}</td>
+                    <td className={styles.muted}>{l.reason}</td>
+                    <td className={styles.muted}>{l.signIn ? formatShortDate(l.signIn) : '—'}</td>
+                    <td className={styles.timeIn}>{l.signIn ? formatTime(l.signIn) : '—'}</td>
+                    <td className={l.signOut ? styles.timeOut : styles.timePending}>{l.signOut ? formatTime(l.signOut) : 'Active'}</td>
+                    <td><span className={`${styles.pill} ${l.signOut ? styles.pillOut : styles.pillIn}`}>{l.signOut ? 'Signed Out' : 'In Building'}</span></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+            {tab === 'admin' && (
+              <table className={styles.table}>
+                <thead><tr><th>Name</th><th>Badge</th><th>Role</th><th>Date</th><th>Login Time</th><th>Logout Time</th><th>Status</th></tr></thead>
+                <tbody>{filtered.map((l, i) => (
+                  <tr key={i}>
+                    <td className={styles.nameCell}>{l.name}</td>
+                    <td className={styles.mono}>{l.badgeNumber}</td>
+                    <td className={styles.muted}>{l.role}</td>
+                    <td className={styles.muted}>{l.loginTime ? formatShortDate(l.loginTime) : '—'}</td>
+                    <td className={styles.timeIn}>{l.loginTime ? formatTime(l.loginTime) : '—'}</td>
+                    <td className={l.logoutTime ? styles.timeOut : styles.timePending}>{l.logoutTime ? formatTime(l.logoutTime) : 'Active'}</td>
+                    <td><span className={`${styles.pill} ${l.logoutTime ? styles.pillOut : styles.pillIn}`}>{l.logoutTime ? 'Logged Out' : 'Active Session'}</span></td>
+                  </tr>
+                ))}</tbody>
               </table>
             )}
           </div>
